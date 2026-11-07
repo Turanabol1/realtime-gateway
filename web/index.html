@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real-Time Operations Gateway</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --text: #1d2433; --muted: #6b7587; --line: #dfe4ec;
+    --accent: #2563eb; --accent-text: #ffffff; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
+    --own: #e6efff; --other: #f0f2f6; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f141c; --card: #171e29; --text: #e6eaf2; --muted: #93a0b5; --line: #2a3445;
+      --accent: #4f8cff; --accent-text: #0b1220; --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+      --own: #1f3358; --other: #222c3b; --input: #0f141c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 20px 24px 4px; max-width: 1200px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px;
+         padding: 20px 24px 32px; max-width: 1200px; margin: 0 auto; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px;
+            display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .head h2 { margin: 0; font-size: 17px; }
+  .badge { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line);
+           color: var(--muted); white-space: nowrap; }
+  .badge::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                   background: var(--muted); margin-right: 6px; }
+  .badge.ok { color: var(--ok); } .badge.ok::before { background: var(--ok); }
+  .badge.warn { color: var(--warn); } .badge.warn::before { background: var(--warn); }
+  .badge.bad { color: var(--bad); } .badge.bad::before { background: var(--bad); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  .tile .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 26px; font-weight: 650; margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .tile svg { width: 100%; height: 36px; display: block; }
+  .tile polyline { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; }
+  .clock { font-size: 18px !important; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 140px; min-width: 0; }
+  .field label { font-size: 12px; color: var(--muted); }
+  input { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--line);
+          border-radius: 8px; padding: 8px 10px; min-width: 0; width: 100%; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:disabled { opacity: .55; }
+  button { font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+           border-radius: 8px; padding: 8px 16px; cursor: pointer; font-weight: 600; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #log { height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+         display: flex; flex-direction: column; gap: 6px; background: var(--bg); }
+  .msg { max-width: 85%; padding: 6px 10px; border-radius: 10px; background: var(--other); word-break: break-word; }
+  .msg.own { align-self: flex-end; background: var(--own); }
+  .msg .meta { font-size: 11px; color: var(--muted); margin-bottom: 1px; }
+  .sys { align-self: center; font-size: 12px; color: var(--muted); text-align: center; }
+  footer { max-width: 1200px; margin: 0 auto; padding: 0 24px 24px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Real-Time Operations Gateway</h1>
+  <p>Телеметрія сервера через SSE та оперативний зв'язок через WebSocket</p>
+</header>
+
+<main>
+  <!-- Панель телеметрії (SSE) -->
+  <section aria-labelledby="sse-title">
+    <div class="head">
+      <h2 id="sse-title">Панель телеметрії (SSE)</h2>
+      <span id="sse-status" class="badge">Підключення…</span>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="label">Горутини</div>
+        <div class="value" id="m-goroutines">–</div>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline id="spark-g" points=""/></svg>
+      </div>
+      <div class="tile">
+        <div class="label">Пам'ять (alloc)</div>
+        <div class="value"><span id="m-alloc">–</span> <small>МБ</small></div>
+        <svg viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true"><polyline id="spark-m" points=""/></svg>
+      </div>
+      <div class="tile">
+        <div class="label">Час сервера</div>
+        <div class="value clock" id="m-time">–</div>
+        <div class="label" id="m-count">повідомлень: 0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Пульт оперативного зв'язку (WebSocket) -->
+  <section aria-labelledby="ws-title">
+    <div class="head">
+      <h2 id="ws-title">Пульт оперативного зв'язку (WebSocket)</h2>
+      <span id="ws-status" class="badge">Не підключено</span>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="room">Кімната</label>
+        <input id="room" value="general" list="rooms" maxlength="32" autocomplete="off">
+        <datalist id="rooms"><option value="general"><option value="alerts"></datalist>
+      </div>
+      <div class="field">
+        <label for="name">Ім'я оператора</label>
+        <input id="name" maxlength="32" autocomplete="off">
+      </div>
+      <button id="connect" type="button">Підключитися</button>
+      <button id="disconnect" type="button" class="secondary" disabled>Відключитися</button>
+    </div>
+    <div id="log" role="log" aria-live="polite"></div>
+    <div class="row">
+      <div class="field" style="flex-basis: 220px;">
+        <label for="text">Повідомлення</label>
+        <input id="text" placeholder="Введіть текст і натисніть Enter" maxlength="1000" autocomplete="off" disabled>
+      </div>
+      <button id="send" type="button" disabled>Надіслати</button>
+    </div>
+  </section>
+</main>
+
+<footer>Повідомлення отримують лише учасники тієї ж кімнати. Відкрийте сторінку у двох вкладках, щоб перевірити.</footer>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+
+  function setBadge(el, kind, text) {
+    el.className = 'badge' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+  }
+
+  // ---------- SSE: телеметрія ----------
+  const MAX_POINTS = 60;
+  const history = { g: [], m: [] };
+  let sseCount = 0;
+
+  function sparkline(el, values) {
+    if (values.length < 2) { return; }
+    const min = Math.min(...values), max = Math.max(...values);
+    const span = (max - min) || 1;
+    const pts = values.map((v, i) => {
+      const x = (i / (MAX_POINTS - 1)) * 120;
+      const y = 33 - ((v - min) / span) * 30;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    });
+    el.setAttribute('points', pts.join(' '));
+  }
+
+  function push(arr, v) { arr.push(v); if (arr.length > MAX_POINTS) { arr.shift(); } }
+
+  const es = new EventSource('/api/v1/metrics/stream');
+  es.onopen = () => setBadge($('sse-status'), 'ok', 'Потік активний');
+  es.onerror = () => setBadge($('sse-status'), 'warn', 'Перепідключення…');
+  es.onmessage = (e) => {
+    let d;
+    try { d = JSON.parse(e.data); } catch (_) { return; }
+    $('m-goroutines').textContent = d.goroutines;
+    $('m-alloc').textContent = Number(d.alloc_mb).toFixed(2);
+    $('m-time').textContent = new Date(d.time).toLocaleTimeString('uk-UA');
+    $('m-count').textContent = 'повідомлень: ' + (++sseCount);
+    push(history.g, d.goroutines);
+    push(history.m, d.alloc_mb);
+    sparkline($('spark-g'), history.g);
+    sparkline($('spark-m'), history.m);
+  };
+  window.addEventListener('beforeunload', () => es.close());
+
+  // ---------- WebSocket: кімнати ----------
+  let ws = null;
+  let myName = '';
+  $('name').value = 'operator-' + (100 + Math.floor(Math.random() * 900));
+
+  const log = $('log');
+
+  function addSystem(text) {
+    const el = document.createElement('div');
+    el.className = 'sys';
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function addMessage(m) {
+    const el = document.createElement('div');
+    el.className = 'msg' + (m.sender === myName ? ' own' : '');
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = '[' + m.room + '] ' + m.sender + ' · ' + new Date(m.time).toLocaleTimeString('uk-UA');
+    const body = document.createElement('div');
+    body.textContent = m.text; // textContent: повідомлення інших користувачів не інтерпретуються як HTML
+    el.append(meta, body);
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function setConnected(connected) {
+    $('connect').disabled = connected;
+    $('disconnect').disabled = !connected;
+    $('room').disabled = connected;
+    $('name').disabled = connected;
+    $('text').disabled = !connected;
+    $('send').disabled = !connected;
+    if (connected) { $('text').focus(); }
+  }
+
+  function connect() {
+    if (ws) { return; }
+    const room = $('room').value.trim() || 'general';
+    const name = $('name').value.trim() || 'operator';
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(room)) {
+      addSystem('Назва кімнати: 1–32 символи (літери латиницею, цифри, _ та -)');
+      return;
+    }
+    myName = name;
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = scheme + '://' + location.host + '/api/v1/ws?room=' + encodeURIComponent(room) +
+                '&name=' + encodeURIComponent(name);
+    setBadge($('ws-status'), 'warn', 'Підключення…');
+    const socket = new WebSocket(url);
+    ws = socket;
+
+    socket.onopen = () => {
+      setBadge($('ws-status'), 'ok', 'Кімната: ' + room);
+      addSystem('Підключено до кімнати «' + room + '» як ' + name);
+      setConnected(true);
+    };
+    socket.onmessage = (e) => {
+      try { addMessage(JSON.parse(e.data)); } catch (_) { addSystem(String(e.data)); }
+    };
+    socket.onclose = () => {
+      if (ws === socket) { ws = null; }
+      setBadge($('ws-status'), '', 'Не підключено');
+      addSystem('З\'єднання закрито');
+      setConnected(false);
+    };
+    socket.onerror = () => setBadge($('ws-status'), 'bad', 'Помилка з\'єднання');
+  }
+
+  function send() {
+    const input = $('text');
+    const text = input.value.trim();
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) { return; }
+    ws.send(text);
+    input.value = '';
+    input.focus();
+  }
+
+  $('connect').addEventListener('click', connect);
+  $('disconnect').addEventListener('click', () => { if (ws) { ws.close(1000); } });
+  $('send').addEventListener('click', send);
+  $('text').addEventListener('keydown', (e) => { if (e.key === 'Enter') { send(); } });
+  $('room').addEventListener('keydown', (e) => { if (e.key === 'Enter') { connect(); } });
+})();
+</script>
+</body>
+</html>
